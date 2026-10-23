@@ -22,6 +22,6 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
       - name: Test API
-        run: php artisan test
+        run: composer test
       - name: PHP syntax check
         run: find app bootstrap config database routes tests -name '*.php' -print0 | xargs -0 -n1 php -l
