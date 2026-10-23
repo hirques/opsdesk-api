@@ -128,7 +128,7 @@ Use Swagger's **Authorize** control with the bearer token to explore private end
 ## Tests and CI
 
 ```bash
-docker compose exec app php artisan test
+docker compose exec app composer test
 ```
 
 The feature suite covers registration, wrong passwords, token revocation, private routes, ticket ownership, staff-only updates, admin-only deletion and role changes. The GitHub Actions workflow installs dependencies and runs the suite on every push or pull request to `main`.

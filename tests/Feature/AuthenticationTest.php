@@ -39,6 +39,14 @@ class AuthenticationTest extends TestCase
         $token = $login->json('token');
         $this->withToken($token)->getJson('/api/v1/me')->assertOk();
         $this->withToken($token)->postJson('/api/v1/logout')->assertOk();
+
+        // Check that logout revoked the persisted Sanctum token.
+        $tokenId = (int) explode('|', $token, 2)[0];
+        $this->assertDatabaseMissing('personal_access_tokens', ['id' => $tokenId]);
+
+        // Feature tests reuse the same Laravel app across simulated HTTP requests.
+        // Its request guard caches the authenticated user, unlike fresh production requests.
+        $this->app['auth']->forgetGuards();
         $this->withToken($token)->getJson('/api/v1/me')->assertUnauthorized();
     }
 
