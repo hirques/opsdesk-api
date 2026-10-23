@@ -1,0 +1,294 @@
+openapi: 3.0.3
+info:
+  title: OpsDesk API
+  version: 1.0.0
+  description: >-
+    Demonstration REST API for ticket operations, bearer token authentication
+    and role-based access control. No company data or credentials are included.
+servers:
+  - url: /api/v1
+security: []
+tags:
+  - name: Auth
+  - name: Tickets
+  - name: Users
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Sanctum token
+  schemas:
+    User:
+      type: object
+      properties:
+        id: {type: integer, example: 1}
+        name: {type: string, example: Demo User}
+        email: {type: string, format: email, example: demo@example.test}
+        role: {type: string, enum: [viewer, operator, admin]}
+    Ticket:
+      type: object
+      properties:
+        id: {type: integer, example: 8}
+        title: {type: string, example: VPN access issue}
+        description: {type: string, nullable: true}
+        priority: {type: string, enum: [low, normal, high]}
+        status: {type: string, enum: [open, in_progress, resolved, closed]}
+        created_by: {type: integer, example: 1}
+        assigned_to: {type: integer, nullable: true, example: 2}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    AuthResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/User'
+        token:
+          type: string
+          description: Secret bearer token. Store securely and do not commit it.
+    Error:
+      type: object
+      properties:
+        message: {type: string}
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Forbidden:
+      description: Authenticated but role or ownership is insufficient
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Validation:
+      description: Invalid request payload
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+paths:
+  /register:
+    post:
+      tags: [Auth]
+      summary: Register a viewer account (public)
+      description: Roles supplied in the payload are ignored; all registrants start as viewers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, password_confirmation]
+              properties:
+                name: {type: string, maxLength: 120}
+                email: {type: string, format: email}
+                password: {type: string, format: password, minLength: 12}
+                password_confirmation: {type: string, format: password}
+      responses:
+        '201':
+          description: Viewer created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthResponse'}
+        '422': {$ref: '#/components/responses/Validation'}
+        '429': {description: Too many requests}
+  /login:
+    post:
+      tags: [Auth]
+      summary: Exchange email and password for a Sanctum bearer token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: {type: string, format: email}
+                password: {type: string, format: password}
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthResponse'}
+        '422': {$ref: '#/components/responses/Validation'}
+        '429': {description: Too many requests}
+  /me:
+    get:
+      tags: [Auth]
+      summary: Get current account
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Current account
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/User'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /logout:
+    post:
+      tags: [Auth]
+      summary: Revoke current token
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Token revoked}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /tickets:
+    get:
+      tags: [Tickets]
+      summary: List tickets (viewers see only tickets they created)
+      description: Results paginated 20 per page. Operators and admins see all.
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: Paginated tickets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/Ticket'}
+                  links: {type: object}
+                  meta: {type: object}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      tags: [Tickets]
+      summary: Open a ticket
+      description: Server always sets created_by to caller and status to open.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: {type: string, maxLength: 160}
+                description: {type: string, nullable: true, maxLength: 10000}
+                priority: {type: string, enum: [low, normal, high], default: normal}
+      responses:
+        '201':
+          description: Ticket created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/Ticket'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '422': {$ref: '#/components/responses/Validation'}
+  /tickets/{ticket}:
+    parameters:
+      - name: ticket
+        in: path
+        required: true
+        schema: {type: integer}
+    get:
+      tags: [Tickets]
+      summary: Read a ticket you own or have staff rights to
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Ticket details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/Ticket'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    patch:
+      tags: [Tickets]
+      summary: Edit a ticket (operator/admin)
+      description: Only admin may set assigned_to. Viewers cannot edit.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: {type: string, maxLength: 160}
+                description: {type: string, nullable: true}
+                priority: {type: string, enum: [low, normal, high]}
+                status: {type: string, enum: [open, in_progress, resolved, closed]}
+                assigned_to: {type: integer, nullable: true}
+      responses:
+        '200':
+          description: Ticket updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/Ticket'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {$ref: '#/components/responses/Validation'}
+    delete:
+      tags: [Tickets]
+      summary: Delete ticket (admin only)
+      security: [{bearerAuth: []}]
+      responses:
+        '204': {description: Deleted}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /users:
+    get:
+      tags: [Users]
+      summary: List users (admin only)
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Users without password data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/User'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /users/{user}/role:
+    patch:
+      tags: [Users]
+      summary: Change another user's role (admin only)
+      description: Admin cannot change their own role through this endpoint.
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: user
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: {type: string, enum: [viewer, operator, admin]}
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/User'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {$ref: '#/components/responses/Validation'}
